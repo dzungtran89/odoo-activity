@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import subprocess
 from typing import ClassVar
 
 from textual import events, work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.theme import Theme
@@ -155,8 +157,8 @@ class OdooActivity(App):
         ("q", "quit", "Quit"),
         ("s", "toggle_start_stop", "Start/Stop"),
         ("r", "restart", "Restart"),
-        ("[", "prev_tab", "Prev tab"),
-        ("]", "next_tab", "Next tab"),
+        Binding("[", "prev_tab", "Prev tab", show=False),
+        Binding("]", "next_tab", "Next tab", show=False),
         ("p", "select_tab('Processes')", "Processes"),
         ("l", "select_tab('Logs')", "Logs"),
         ("l", "select_tab('Locks')", "Locks"),
@@ -165,6 +167,7 @@ class OdooActivity(App):
         ("u", "select_tab('Users')", "Users"),
         ("j", "select_tab('Jobs')", "Jobs"),
         ("slash", "search", "Search"),
+        ("v", "view_in_less", "View in less"),
         ("K", "kill_process", "Kill -9"),
         ("L", "quit_process", "Log dump -3"),
         ("e", "toggle_config_mode", "Compact/Explain/Expand/Clean"),
@@ -438,6 +441,9 @@ class OdooActivity(App):
         if action == "search":
             return self.query_one(ActivityPane).has_search()
 
+        if action == "view_in_less":
+            return self.query_one(ActivityPane).log_path() is not None
+
         if action in ("kill_process", "quit_process"):
             return self.query_one(ActivityPane).is_processes_active()
 
@@ -460,6 +466,21 @@ class OdooActivity(App):
 
     def action_search(self) -> None:
         self.query_one(ActivityPane).open_search()
+
+    def action_view_in_less(self) -> None:
+        """Open log in `less` with follow mode (+F)."""
+        path = self.query_one(ActivityPane).log_path()
+        if path is None:
+            return
+
+        with self.suspend():
+            # Ignore SIGINT locally so Ctrl+C drops `less` out of follow mode
+            # without killing this app
+            old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+            try:
+                subprocess.run(["less", "+F", "-R", str(path)])  # noqa: S603, S607
+            finally:
+                signal.signal(signal.SIGINT, old_handler)
 
     def action_toggle_maximize(self) -> None:
         if self.screen.maximized is not None:

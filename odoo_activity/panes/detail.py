@@ -19,6 +19,7 @@ from rich.syntax import Syntax
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.widget import Widget
 from textual.widgets import DataTable, Input, Log, Static
 
 from odoo_activity.probes import (
@@ -153,6 +154,7 @@ class ActivityPane(Vertical):
         self._pending: dict[str, tuple[object, Callable[[], Awaitable[None]]]] = {}
         self._dbtab = _DbTab()
         self._showing_raw = False  # viewing one row's raw json in #acbody
+        self._pre_search_focus: Widget | None = None  # restored on escape from #acsearch
         self._render_mode()
 
     def _coalesce(self, key: str, ident: object, factory: Callable[[], Awaitable[None]]) -> None:
@@ -192,6 +194,11 @@ class ActivityPane(Vertical):
     def is_logs_active(self) -> bool:
         return self._mode == "instance" and self.TABS["instance"][self._tab] == "Logs"
 
+    def log_path(self) -> Path | None:
+        """The tailed file behind the active Logs tab, if any — used to hand
+        off to a real pager instead of reimplementing its navigation."""
+        return self._log_path if self.is_logs_active() else None
+
     def is_config_active(self) -> bool:
         return self._mode == "instance" and self.TABS["instance"][self._tab] == "Config"
 
@@ -216,6 +223,7 @@ class ActivityPane(Vertical):
             return
 
         box = self.query_one("#acsearch", Input)
+        self._pre_search_focus = self.app.focused
         box.value = ""  # blank each time: enter alone clears an existing filter
         box.display = True
         box.focus()
@@ -224,7 +232,10 @@ class ActivityPane(Vertical):
         box = self.query_one("#acsearch", Input)
         if event.key == "escape" and box.has_focus:
             box.display = False
-            self.app.query_one("#instances").focus()
+            target = self._pre_search_focus
+            if target is None or not target.is_mounted:
+                target = self.app.query_one("#instances")
+            target.focus()
             event.stop()
             return
 
@@ -420,6 +431,10 @@ class ActivityPane(Vertical):
     def _follow_log(self, path: Path | None, text: str | None) -> None:
         self._log_path = path
         self._log_query = None
+        # log_path() only resolves once this (async) load lands, so callers
+        # gating a binding on it need telling explicitly — a sync tab switch
+        # doesn't need this, its refresh_bindings() call already lands after.
+        self.app.refresh_bindings()
 
         if path is None:
             self._log_pos = 0
