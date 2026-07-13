@@ -287,7 +287,7 @@ class ActivityPane(Vertical):
 
         self._log_query = event.value.strip() or None
         event.input.display = False
-        self.app.query_one("#instances").focus()
+        self.query_one("#acbody", Log).focus()
         self._render_log()
 
     def show_instance(self, inst: dict | None) -> None:
