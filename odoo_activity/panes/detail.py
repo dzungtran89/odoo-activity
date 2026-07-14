@@ -591,14 +591,14 @@ class ActivityPane(Vertical):
             if ident != self._dbtab.ident:
                 return
 
-            if not rows:
-                self._log_body("(empty)")
-            else:
-                self._dbtab.rows = rows
-                self._show_datatable(rows)
+            self._handle_rows(rows)
             return
 
         proc = await asyncio.to_thread(start_odoo_db, category.lower(), db, port)
+        if proc is None:
+            self._log_body("(odoo-db not found on PATH)")
+            return
+
         self._dbtab.proc = proc
 
         def _wait() -> tuple[str, str] | None:
@@ -620,6 +620,9 @@ class ActivityPane(Vertical):
             return
 
         rows, raw = parse_odoo_db_output(*result)
+        self._handle_rows(rows, raw)
+
+    def _handle_rows(self, rows: list[dict] | None, raw: str = "") -> None:
         if rows is None:
             self._log_body(raw or "(no output)")
         elif not rows:

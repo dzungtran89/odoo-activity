@@ -25,6 +25,7 @@ from odoo_activity.probes import (
     format_duration,
     instance_action,
     list_instances,
+    odoosh_dumpstacks,
     procs_of,
     read_cpu_times,
     read_loadavg,
@@ -167,6 +168,7 @@ class OdooActivity(App):
         ("slash", "search", "Search"),
         ("K", "kill_process", "Kill -9"),
         ("L", "quit_process", "Log dump -3"),
+        ("D", "dumpstacks", "Dump stacks (odoo.sh)"),
         ("e", "toggle_config_mode", "Compact/Explain/Expand/Clean"),
         ("f", "toggle_maximize", "Maximize"),
     ]
@@ -441,6 +443,10 @@ class OdooActivity(App):
         if action in ("kill_process", "quit_process"):
             return self.query_one(ActivityPane).is_processes_active()
 
+        if action == "dumpstacks":
+            inst = self.current_instance()
+            return inst is not None and inst["manager"] == "odoosh"
+
         if action == "toggle_config_mode":
             return self.query_one(ActivityPane).is_config_active()
 
@@ -499,7 +505,9 @@ class OdooActivity(App):
             return
 
         name, manager = inst["name"], inst["manager"]
-        await asyncio.to_thread(instance_action, name, action, manager)
+        error = await asyncio.to_thread(instance_action, name, action, manager)
+        if error:
+            self.app.notify(error, severity="warning", timeout=3)
         self.poll_instances()  # re-label in place; keeps selection, no flicker
 
     def action_kill_process(self) -> None:
@@ -525,6 +533,21 @@ class OdooActivity(App):
 
     def action_toggle_config_mode(self) -> None:
         self.query_one(ActivityPane).toggle_config_mode()
+
+    def action_dumpstacks(self) -> None:
+        inst = self.current_instance()
+        if inst is None or inst["manager"] != "odoosh":
+            return
+        self._run_dumpstacks()
+
+    @work(exclusive=True, group="dumpstacks")
+    async def _run_dumpstacks(self) -> None:
+        """Trigger odoo.sh's stack dump, then jump to Logs to see it — same
+        pattern as action_quit_process's local SIGQUIT."""
+        out = await asyncio.to_thread(odoosh_dumpstacks)
+        if out:
+            self.app.notify(out, timeout=3)
+        self.query_one(ActivityPane).select_tab_by_name("Logs")
 
 
 def run() -> None:
